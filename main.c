@@ -14,6 +14,17 @@ void delay(void)
 // LED_GREEN = PTD5
 void led_green_init()
 {
+  //
+}
+
+void led_green_toggle()
+{
+  //
+}
+
+// LED_RED = PTE29
+void led_red_init()
+{
   SIM->COPC = 0;
   SIM->SCGC5 |= SIM_SCGC5_PORTE_MASK;
   PORTE->PCR[29] = PORT_PCR_MUX(1);
@@ -21,20 +32,9 @@ void led_green_init()
   GPIOE->PSOR = (1 << 29);
 }
 
-void led_green_toggle()
-{
-  GPIOE->PTOR = (1 << 29);
-}
-
-// LED_RED = PTE29
-void led_red_init()
-{
-  //
-}
-
 void led_red_toggle(void)
 {
-  //
+  GPIOE->PTOR = (1 << 29);
 }
 
 int main(void)
