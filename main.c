@@ -1,4 +1,5 @@
 #include "MKL46Z4.h"
+//prueba
 
 // LED_GREEN = PTD5, LED_RED = PTE29 (activos a nivel bajo)
 // SW1 = PTC3 (izquierdo), SW3 = PTC12 (derecho)
