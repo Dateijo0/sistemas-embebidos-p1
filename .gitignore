@@ -30,3 +30,4 @@
 *.hex
 *.bin
 *.srec
+*:Zone.Identifier
