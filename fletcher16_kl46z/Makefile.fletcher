@@ -1,0 +1,120 @@
+# ==============================================================
+# Makefile.fletcher - Práctica 3 (Fletcher-16) para a FRDM-KL46Z
+# Reutiliza o SDK, o arranque e o linker script da práctica 4.
+# Colócao no MESMO directorio có Makefile da práctica 4 (onde está SDK/),
+# xunto coa carpeta fletcher/.
+#
+# Uso:
+#   make -f Makefile.fletcher BUILD=O0    N=100   flash
+#   make -f Makefile.fletcher BUILD=Ofast N=100   flash
+#   make -f Makefile.fletcher BUILD=O0    N=1024  flash
+#   make -f Makefile.fletcher BUILD=Ofast N=1024  flash
+#   make -f Makefile.fletcher build_all           (compila as 4 variantes)
+#   make -f Makefile.fletcher test                (proba o algoritmo no PC)
+#   make -f Makefile.fletcher asm BUILD=Ofast     (asm xerado de fletcher16.c)
+# BUILD afecta SÓ ao código da práctica (fletcher_main.c e fletcher16.c);
+# o SDK compílase sempre igual (-Os).
+# ==============================================================
+SDK       = SDK
+BOARD_DIR = $(SDK)/boards/frdmkl46z
+HELLO_DIR = $(BOARD_DIR)/demo_apps/hello_world
+DEV       = $(SDK)/devices/MKL46Z4
+FLET_DIR  = fletcher
+
+BUILD ?= O0
+N     ?= 100
+OPT.O0    = -O0
+OPT.Ofast = -Ofast
+OUT = build/fletcher_$(BUILD)_$(N)
+
+PREFIX  = arm-none-eabi-
+CC      = $(PREFIX)gcc
+OBJCOPY = $(PREFIX)objcopy
+SIZE    = $(PREFIX)size
+OPENOCD = openocd
+
+ARCH = -mcpu=cortex-m0plus -mthumb
+INCLUDES = -I$(SDK)/CMSIS/Include -I$(SDK)/devices -I$(DEV) \
+           -I$(DEV)/drivers -I$(DEV)/utilities -I$(DEV)/utilities/io \
+           -I$(DEV)/utilities/log -I$(DEV)/utilities/str \
+           -I$(BOARD_DIR) -I$(HELLO_DIR) -I$(FLET_DIR)
+
+CPPFLAGS = -DCPU_MKL46Z256VLL4 -DFRDM_KL46Z -DFREEDOM $(INCLUDES) \
+           -DPRINTF_FLOAT_ENABLE=0 -DSCANF_FLOAT_ENABLE=0 \
+           -DPRINTF_ADVANCED_ENABLE=0 -DSCANF_ADVANCED_ENABLE=0 -MMD -MP
+COMMON   = $(ARCH) -std=gnu99 -Wall -fno-common -ffunction-sections \
+           -fdata-sections -ffreestanding -fno-builtin -g
+CFLAGS       = $(COMMON) -Os -DNDEBUG
+BENCH_CFLAGS = $(COMMON) $(OPT.$(BUILD)) -DNDEBUG -DN_ELEMS=$(N)
+ASFLAGS  = $(ARCH) -g -D__STARTUP_CLEAR_BSS
+
+LDFLAGS  = $(ARCH) --specs=nano.specs --specs=nosys.specs \
+           -Wl,--gc-sections -static -Wl,-z,muldefs
+LDLIBS   = -Wl,--start-group -lm -lc -lgcc -lnosys -Wl,--end-group
+LD_SCRIPT = $(HELLO_DIR)/armgcc/MKL46Z256xxx4_flash.ld
+OCD_FLAGS = -f interface/cmsis-dap.cfg -c "transport select swd" -f target/klx.cfg
+
+APP_SRCS = board clock_config pin_mux
+SDK_C = system_MKL46Z4 \
+        fsl_clock fsl_common fsl_gpio fsl_lpsci fsl_uart fsl_smc \
+        fsl_ftfx_controller fsl_ftfx_flash fsl_ftfx_cache fsl_ftfx_flexnvm \
+        fsl_io fsl_log fsl_str fsl_debug_console fsl_assert
+SDK_S = startup_MKL46Z4
+
+vpath %.c $(DEV) $(DEV)/drivers $(DEV)/utilities \
+          $(DEV)/utilities/io $(DEV)/utilities/log $(DEV)/utilities/str
+vpath %.S $(DEV)/gcc
+
+BENCH_OBJS = $(addprefix $(OUT)/, fletcher_main.o fletcher16.o)
+OBJS = $(BENCH_OBJS) \
+       $(addprefix $(OUT)/, $(addsuffix .o, $(APP_SRCS) $(SDK_C) $(SDK_S)))
+ELF = $(OUT)/fletcher.elf
+
+.PHONY: all flash build_all test asm clean
+all: $(ELF) $(ELF:.elf=.bin)
+
+$(ELF): $(OBJS) $(LD_SCRIPT)
+	@mkdir -p $(@D)
+	$(CC) $(LDFLAGS) -T$(LD_SCRIPT) -Wl,-Map=$(@:.elf=.map) $(OBJS) $(LDLIBS) -o $@
+	$(SIZE) $@
+
+$(OUT)/%.bin: $(OUT)/%.elf
+	$(OBJCOPY) -O binary $< $@
+
+# Código da práctica: co nivel de optimización pedido
+$(BENCH_OBJS): $(OUT)/%.o: $(FLET_DIR)/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(BENCH_CFLAGS) -c $< -o $@
+
+# board.c, clock_config.c, pin_mux.c da demo hello_world
+$(OUT)/%.o: $(HELLO_DIR)/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(OUT)/%.o: %.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+
+$(OUT)/%.o: %.S
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(ASFLAGS) -c $< -o $@
+
+flash: $(ELF)
+	$(OPENOCD) $(OCD_FLAGS) -c "program $< verify reset exit"
+
+build_all:
+	@for b in O0 Ofast; do for n in 100 1024; do \
+	$(MAKE) -f Makefile.fletcher BUILD=$$b N=$$n || exit 1; done; done
+
+asm:
+	@mkdir -p $(OUT)
+	$(CC) $(CPPFLAGS) $(BENCH_CFLAGS) -S $(FLET_DIR)/fletcher16.c -o $(OUT)/fletcher16.s
+	@echo "asm en $(OUT)/fletcher16.s"
+
+test:
+	gcc -O2 -Wall $(FLET_DIR)/test_host.c $(FLET_DIR)/fletcher16.c -I$(FLET_DIR) -o /tmp/fletcher_test && /tmp/fletcher_test
+
+clean:
+	$(RM) -r build/fletcher_*
+
+-include $(wildcard $(OUT)/*.d)
